@@ -97,12 +97,9 @@ Padding(
                     ),
             )),
           constraints: BoxConstraints(
-
-            // fix this shit below, make sure sized right
             maxWidth:  MediaQuery.of(context).size.width/1.7,
             minWidth: 20.0,
           ),
-          // is that all?
     )]
     )
     

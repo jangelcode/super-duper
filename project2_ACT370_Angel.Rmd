@@ -1,0 +1,212 @@
+---
+title: "project2_ACT370_Angel"
+author: "Joey Angel"
+date: "4/29/2021"
+output: html_document
+---
+
+## Question 2
+
+### Considered Variables
+
+Annual income, payment plan, hardship status, number of revolving accounts, deferrel term, term, loan amount (only with dti), settlement amount, total high credit limit, total payment, term, funded amount, installment, months since last delinquent, dti, tax liens, issue date, installment, orginal projected accrued interest, public record bankruptcies
+```{r}
+load("~/Downloads/loan.train.Rdata")
+accrued<-loan.train$orig_projected_additional_accrued_interest
+#Data scrubbing for NA's
+loan.train$orig_projected_additional_accrued_interest[is.na(loan.train$orig_projected_additional_accrued_interest)] <- 0
+loan.train$tot_hi_cred_lim[is.na(loan.train$tot_hi_cred_lim)] <- 0
+loan.train$num_rev_accts[is.na(loan.train$num_rev_accts)] <- 0
+loan.train$il_util[is.na(loan.train$il_util)] <- 0
+summary(loan.train$orig_projected_additional_accrued_interest)
+```
+Above we loaded the data turned NA's to zeroes where appropriate, after doing this there were about 1,200 left, which we chose to ignore since the data contains over a million observations.
+
+### Building a model
+
+First we included all the variables found above under considered variables and began eliminating then until we got around 10 left and an R^2 of about .64. At this point we knew removing variables would only decrease the R^2 and adjusted R^2, and we didn't believe there were any variables not considered that would have made a significant improvement in R^2. This led us to believe that some variables may have interactions with other variables that help explain more fo the variation. As a result we squared the right side to get the interation terms and began systematically removing the variables associated with the lowest t-values by themselves and in their interaction terms. This left us with annual income, term, funded amount, installment, and we removed the interaction between installment and funded amount.
+```{r}
+modelTrain<-lm(formula = loan.train$int_rate ~ (log(loan.train$annual_inc) + 
+    loan.train$term + loan.train$funded_amnt + loan.train$installment)^2 -
+      loan.train$funded_amnt:loan.train$installment, data = loan.train)
+summary(modelTrain)
+```
+### Removing potential outliers
+
+At this point we see good results with our model, however, we will remove any extremes to make testing and plots more accurate. I tried running the below code and it was taking a very long time, so for simplicity I will remove the outliers from a smaller model.
+```{r}
+library(dplyr)
+newLoan<-sample_n(loan.train, 4000)
+modelNew<-lm(formula = newLoan$int_rate ~ (log(newLoan$annual_inc) + 
+      newLoan$term + newLoan$funded_amnt + newLoan$installment)^2 - 
+        newLoan$funded_amnt:newLoan$installment, data = newLoan)
+summary(modelNew)
+```
+
+```{r}
+cooksd <- cooks.distance(modelNew)
+cookst <- cooks.distance(modelTrain)
+plot(cooksd, pch="*", cex=2, main="Influential Obs by Cooks distance")  # plot cook's distance
+abline(h = 4*mean(cooksd, na.rm=T), col="red")  # add cutoff line
+text(x=1:length(cooksd)+1, y=cooksd, labels=ifelse(cooksd>4*mean(cooksd, na.rm=T),names(cooksd),""), col="red")
+```
+
+```{r}
+influential <- as.numeric(names(cooksd)[(cooksd > 4*mean(cooksd, na.rm=T))])
+influentialt <- as.numeric(names(cookst)[(cookst > 4*mean(cookst, na.rm=T))])# influential row numbers
+newLoan<-newLoan[-influential, ]
+loan.train<-loan.train[-influentialt, ]
+modelNew<-lm(formula = newLoan$int_rate ~ (log(newLoan$annual_inc) + 
+      newLoan$term + newLoan$funded_amnt + newLoan$installment)^2 - 
+        newLoan$funded_amnt:newLoan$installment, data = newLoan)
+modelTrain<-lm(formula = loan.train$int_rate ~ (log(loan.train$annual_inc) + 
+    loan.train$term + loan.train$funded_amnt + loan.train$installment)^2 -
+      loan.train$funded_amnt:loan.train$installment, data = loan.train)
+summary(modelTrain)
+summary(modelNew)
+```
+
+Note we got a stronger correlation after we removed the identified outliers and retrained our model without the outliers.
+
+### Checking Assumptions
+
+Now we will continue our analysis of our model by testing for normality, linearity, independence, and equal variance (homoskedasticity). To make this testing and plotting process much faster (and possible for running test where R has limits on sample size such as the Shapiro-Wilks test) we will use the smaller model we used for cooks distance.
+
+### Normality
+Testing for normality we will graphically look at the normqq plot which looks semi-normal however not quite as normal as we would like.
+```{r}
+# Gives normal distribution
+qqnorm(resid(modelTrain))
+qqline(resid(modelTrain))
+```
+
+Testing our findings from the normqq plot we will now use the shapiro-wilks test to determine if our residuals are normally distributed. Note we need to use the small data set for this because it won't allow more than 5000 observations.
+```{r}
+shapiro.test(resid(modelNew))
+```
+Results indicate that it is not necessarily normally distributed, since for a sample of 4000 the W must be larger than about .99 to fail to reject the null hypothesis.
+
+### Linearity
+Here we just to make sure that each variable has a linear relationship with the dependent variable. We look at the scatter plots of each predictor variable with the outcome and overlay a fit line.
+```{r}
+require(ggplot2)
+ggplot(modelNew,aes(y=newLoan$int_rate,x=newLoan$installment))+geom_point()+geom_smooth(method="lm")
+ggplot(modelNew,aes(y=newLoan$int_rate,x=newLoan$term))+geom_point()+geom_smooth(method="lm")
+ggplot(modelNew,aes(y=newLoan$int_rate,x=newLoan$funded_amnt))+geom_point()+geom_smooth(method="lm")
+ggplot(modelNew,aes(y=newLoan$int_rate,x=log(newLoan$annual_inc)))+geom_point()+geom_smooth(method="lm")
+```
+
+### Checking for Independence
+This requirement is usually met if the data has been collected from a sample of independent participants, and we will assume that the dataset was since we have no reason not to believe so.
+
+### Equal Variance
+
+Testing for equal variance (homoskedasticity) we will plot the residuals vs the fitted values.
+The plot of the residuals looks about like what we would hope for as the distribution looks close to random. The plot of residual vs fitted values howver indicates that our model likely suffers from heteroskedasticity. For example, the lowest fitted values, where int_rate < 5, always produce positive residuals. This implies our model consistenly over estimates low interest rates.
+```{r}
+plot(resid(modelNew))
+plot(modelNew, which = 1)
+```
+
+### Checking predicted values
+
+We will do this simply by checking the first couple observations, more random ones are included in the powerpoint.
+```{r}
+# Comparing some predicted values to the model's fitted values
+head(newLoan$int_rate)
+head(modelNew$fitted.values)
+head(modelNew$residuals)
+```
+
+### Residual Density Plot
+
+Lastly we will graph the residual density just for good measure.
+```{r}
+#residual density plot
+library(ggplot2)
+ggplot(newLoan, aes(x=modelNew$residuals)) + 
+  geom_histogram(aes(y=..density..), colour="black", fill="white")+ 
+  geom_density(alpha=.2, fill="red") + xlim(c(-10,10)) + 
+  geom_vline(aes(xintercept=mean(modelNew$residuals)), color="blue", linetype="dashed", size=1)
+```
+
+## Question 3
+
+### Building the Model
+For this model we used the same variables from question 3 and created new variables from already existing ones in the dataset to create the predicted value percent profit.
+```{r}
+# Subset from loan.train with all of our variables from q2 plus the variables mentioned in q3
+selectSub <- select(loan.train, term,installment,loan_amnt,total_pymnt,
+  total_rec_int,loan_status,int_rate,funded_amnt,annual_inc,total_rec_late_fee,
+  total_rec_prncp)
+
+# This is the filtered subset that only includes Charged Off rows
+loanSubset <- selectSub[which(selectSub$loan_status == "Charged Off"),]
+
+
+# Vector from term column to calculate other columns (need the space)
+intTerms <- ifelse(loanSubset$term == " 60 months", 60, 36)
+
+# profits using formula given in q3 and percent profit of actual/expected
+loanSubset$exp_profit <- ((intTerms*loanSubset$installment)-
+  loanSubset$loan_amnt)
+loanSubset$act_profit <- loanSubset$total_rec_int-
+  loanSubset$total_rec_late_fee
+
+loanSubset$per_profit <- (loanSubset$exp_profit-loanSubset$act_profit)/
+  loanSubset$loan_amnt
+
+# model with variables from q2
+per_model1 <- lm(per_profit ~ (log(annual_inc) + 
+    term + funded_amnt + installment)^2 -
+    funded_amnt:installment, data = loanSubset)
+
+summary(per_model1)
+```
+
+### Outliers
+Now we cut down the subset into a sample and then eliminate the outliers like in question 2 to create a better fit.
+```{r}
+loanSubset <- sample_n(loanSubset, 4000)
+per_model1 <- lm(per_profit ~ (log(annual_inc) + 
+    term + funded_amnt + installment)^2 -
+    funded_amnt:installment, data = loanSubset)
+cooksd <- cooks.distance(per_model1)
+plot(cooksd, pch="*", cex=2, main="Influential Obs by Cooks distance")  # plot cook's distance
+abline(h = 4*mean(cooksd), col="red")  # add cutoff line
+text(x=1:length(cooksd)+1, y=cooksd, labels=ifelse(cooksd>4*mean(cooksd, na.rm=T),names(cooksd),""), col="orange")
+influential <- as.numeric(names(cooksd)[(cooksd > 4*mean(cooksd, na.rm=T))])
+loanSubset <- loanSubset[-influential, ]
+per_model2 <- lm(per_profit ~ (log(annual_inc) +
+    term + funded_amnt + installment)^2 -
+    funded_amnt:installment, data = loanSubset)
+summary(per_model2)
+```
+
+### Checking Assumptions
+Next we check each assumption like in question 2
+```{r}
+# Checking normality
+shapiro.test(resid(per_model2))
+qqnorm(resid(per_model2))
+qqline(resid(per_model2))
+
+# Checking linearity
+require(ggplot2)
+ggplot(per_model2,aes(y=loanSubset$per_profit,x=loanSubset$installment))+geom_point()+geom_smooth(method="lm")
+ggplot(per_model2,aes(y=loanSubset$per_profit,x=loanSubset$term))+geom_point()+geom_smooth(method="lm")
+ggplot(per_model2,aes(y=loanSubset$per_profit,x=loanSubset$funded_amnt))+geom_point()+geom_smooth(method="lm")
+ggplot(per_model2,aes(y=loanSubset$per_profit,x=log(loanSubset$annual_inc)))+geom_point()+geom_smooth(method="lm")
+
+# Checking homoscedasticity
+plot(resid(per_model2))
+```
+
+### Density Plot
+Lastly, create a density plot to truely see the normality of the residuals
+```{r}
+ggplot(loanSubset, aes(x=per_model2$residuals)) + 
+  geom_histogram(aes(y=..density..), colour="black", fill="white")+ 
+  geom_density(alpha=.2, fill="orange") + xlim(c(-.5,.5)) + 
+  geom_vline(aes(xintercept=mean(per_model2$residuals)), color="blue")
+```
